@@ -1,7 +1,9 @@
 import hashlib
 import json
 from time import time
+from uuid import uuid4
 
+from flask import Flask, jsonify, request
 
 class Blockchain(object):
     def __init__(self):
@@ -12,7 +14,7 @@ class Blockchain(object):
         self.new_block(previous_hash=1, proof=100)
 
 
-    def new_block(self,proof, previous_hash=none):
+    def new_block(self,proof, previous_hash=None):
         '''
         Create a new Block and adds it to the chain
         :param proof: <int> The proof given by the Proof of Work algorithm
@@ -26,6 +28,13 @@ class Blockchain(object):
             'proof': proof,
             'previous_harsh':previous_hash or self.hash(self.chain[-1]),
         }
+
+        # Reset the current list of transactions
+        self.current_transactions = []
+
+        self.chain.append(block)
+
+        return block
 
 
 
@@ -55,6 +64,33 @@ class Blockchain(object):
         return self.chain[-1]
 
 
+    def proof_of_work(self,last_proof):
+        '''
+        simple proof of work:
+         - find p', to make sure hash(pp') start with four 0
+         - p is last proof of work, p' is current proof of work
+        :param last_proof: <int>
+        :return: <int>
+        '''
+
+        proof =0
+        while self.valid_proof(last_proof, proof) is False:
+            proof +=1
+        return proof
+
+
+    @staticmethod
+    def valid_proof(last_proof, proof):
+        '''
+        valid proof: if hash(last_proof, proof) starts with four 0?
+        :param last_proof: <int> Previous proof
+        :param proof: <int> Current proof
+        :return: <bool> Ture if correct, False if not
+        '''
+        guess = f'{last_proof}{proof}'.encode()
+        guess_hash = hashlib.sha256(guess).hexdigest()
+        return guess_hash[:4] == "0000"
+
 
     @staticmethod
     def hash(block):
@@ -68,7 +104,74 @@ class Blockchain(object):
         return hashlib.sha256(block_string).hexdigest()
 
 
-#理解工作量证明
+#Instantiate our Node
+app = Flask(__name__)
+
+#Generate a global unique address for this node
+node_identifier = str(uuid4()).replace('_','')
+
+#Instantiate the Blockchain
+
+blockchain = Blockchain()
+
+@app.route('/mine', methods=['GET'])
+def mine():
+    # We run the proof of work algorithm to get the next proof...
+    last_block = blockchain.last_block
+    last_proof = blockchain['proof']
+    proof = blockchain.proof_of_work(last_proof)
+
+    #give bonus to proof of work node
+    #sender is "0", means new mined
+
+    blockchain.new_transaction(
+        sender = "0",
+        recipient = node_identifier,
+        amount=1,
+    )
+
+    #Forge the new Block by adding it to the chain
+    block = blockchain.new_block(proof)
+
+    response = {
+        'message': "New Block Forged",
+        'index': block['index'],
+        'transactions':block['transactions'],
+        'proof': block['proof'],
+        'previous_hash':block['previous_hash'],
+    }
+    return jsonify(response),200
+
+
+
+
+@app.route('/transactions/new',methods=['POST'])
+def new_transaction():
+    values = request.get_json()
+
+    #Check taht the requried fields are in teh POST'ed data
+    required = ['sender','recipient','amount']
+    if not all(k in values for k in required):
+        return 'Missing values', 400
+
+    #Create a new transaction
+    index = blockchain.new_transaction(values['sender'], values['receipient'], values['amount'])
+    response = {'message': f'Trnsaction will ba added to Block {index}'}
+    return jsonify(response), 201
+
+
+
+@app.route('/chain',methods=['GET'])
+def full_chain():
+    response = {
+        'chain': blockchain.chain,
+        'length': len(blockchain.chain),
+    }
+    return jsonify(response),200
+
+if __name__=='__main__':
+    app.run(host='0.0.0.0', port=5000)
+
 
 
 
